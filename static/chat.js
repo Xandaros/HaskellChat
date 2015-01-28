@@ -14,7 +14,7 @@ socket.onerror = function(error)
 socket.onmessage = function(msg)
 {
 	var cont = document.getElementById("chatbox-content")
-	cont.innerHTML = cont.innerHTML + "<br />" + msg.data;
+	cont.innerHTML = cont.innerHTML + msg.data + "<br />" ;
 }
 
 function sendMessage()

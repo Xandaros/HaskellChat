@@ -9,7 +9,7 @@
 <div id="inputbox">
 	<div class="border" id="inputbox-border">
 		<form onsubmit="sendMessage(); return false;">
-			<input type="text" id="inputbox-content" />
+			<input type="text" id="inputbox-content" autocomplete="off" />
 		</form>
 	</div>
 </div>
