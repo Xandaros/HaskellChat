@@ -8,6 +8,7 @@ module Client
     )
     where
 
+import           Control.Monad (liftM)
 import           Data.IORef
 import           Data.List
 import           Data.Maybe (fromJust)
@@ -28,7 +29,7 @@ removeClient :: Client -> IORef [Client] -> IO ()
 removeClient client = flip modifyIORef (delete client)
 
 newNick :: IORef [Client] -> IO T.Text
-newNick clients = existingNicks >>= \nicks -> return $ fromJust $ (find (`notElem` nicks) nickList)
+newNick clients = existingNicks >>= \nicks -> return $ fromJust $ find (`notElem` nicks) nickList
     where
-        existingNicks = readIORef clients >>= return . (map _nick)
+        existingNicks = liftM (map _nick) $ readIORef clients
         nickList = map (T.pack . ("client"++) . show) [1..]
