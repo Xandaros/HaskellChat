@@ -9,6 +9,7 @@ module Site
   ) where
 
 ------------------------------------------------------------------------------
+import           Control.Exception (try, Exception)
 import           Control.Monad.Trans (liftIO)
 import           Control.Monad (when, liftM)
 import           Control.Monad.State (get)
@@ -40,15 +41,17 @@ socketHandler = do
 socketApp :: App -> WS.PendingConnection -> IO ()
 socketApp app pending = do
     connection <- WS.acceptRequest pending
+    forkPingThread connection 5
+
     clientAmnt <- liftM length $ readIORef (_clients app)
 
     let client = Client (clientAmnt + 1) connection
     
     addClient client (_clients app)
 
-
     liftIO $ putStrLn ("Clients: " ++ show clientAmnt)
-    _ <- clientThread app connection
+
+    (try $ clientThread app connection) :: IO (Either ConnectionException ())
 
     liftIO $ putStrLn "Client Disconnected"
 
