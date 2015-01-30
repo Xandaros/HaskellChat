@@ -1,23 +1,31 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module MessageHandler
     ( socketApp
     , broadcast
     , handleMessage
+    , isCommand -- TODO
     ) where
 
 import           Control.Exception (try)
+import           Control.Lens
+import           Control.Monad (when, liftM)
+import           Control.Monad.State
 import           Control.Monad.Trans (liftIO)
-import           Control.Monad (when)
 import qualified Data.ByteString.Lazy.Char8 as LBS8 (ByteString, append)
-import           Data.Text.Lazy.Encoding (encodeUtf8)
+import           Data.Maybe (fromMaybe, listToMaybe)
+import           Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
 import           Data.IORef
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 import           Network.WebSockets
 
 import           Application
-import           Client
+import           Client hiding (nick)
+
+data HandlerState = HandlerState { _client :: Client
+                                 }
 
 socketApp :: App -> PendingConnection -> IO ()
 socketApp app pending = do
@@ -42,21 +50,44 @@ socketApp app pending = do
 
 clientThread :: App -> Client -> IO ()
 clientThread app client = do
-    msg <- receive (_connection client)
-    result <- handleMessage app client msg
-    when result $ clientThread app client
-
-handleMessage :: App -> Client -> Message -> IO Bool
-handleMessage _ client (ControlMessage a) = case a of
-    (Ping p) -> send connection (ControlMessage $ Pong p) >> return True
-    (Pong _) -> return True
-    (Close _ b) -> sendClose connection b >> return False
-    where connection = _connection client
-handleMessage app client (DataMessage a) = case a of
-    (Binary _) -> return True -- Unsupported
-    (Text t) -> liftM (map _connection) clients_ >>=
-        broadcast (encodeUtf8 ("MSG " `LT.append` LT.fromChunks [_nick client] `LT.append` " ") `LBS8.append` t) >> return True
-        where clients_ = readIORef (_clients app)
+    msg <- receiveDataMessage (_connection client)
+    (result, newState) <- runStateT (handleMessage app msg) (HandlerState client)
+    when result $ clientThread app (_client newState)
 
 broadcast :: LBS8.ByteString -> [Connection] -> IO ()
 broadcast msg = mapM_ (`send` (DataMessage $ Text msg))
+
+handleMessage :: App -> DataMessage -> StateT HandlerState IO Bool
+handleMessage app a = case a of
+    (Binary _) -> return True -- Unsupported
+    (Text t) -> handleTextMessage app t
+
+handleTextMessage :: App -> LBS8.ByteString -> StateT HandlerState IO Bool
+handleTextMessage app msg = do
+    if isCommand (decodeUtf8 msg)
+        then handleCommand app cmd (drop 1 split')
+        else do
+            client <- liftM _client get
+            lift $ clients_ >>= broadcast ((encodeUtf8 $ "MSG "
+                `LT.append` LT.fromChunks [_nick client] `LT.append` " ")
+                    `LBS8.append` msg)
+    (lift.return) True
+    where split' = LT.splitOn " " (decodeUtf8 msg)
+          cmd = fromMaybe "" $ liftM (LT.drop 1) (listToMaybe split')
+          clients_ = liftM (map _connection) $ readIORef (_clients app)
+
+isCommand :: LT.Text -> Bool
+isCommand = ("/" `LT.isPrefixOf`)
+
+handleCommand :: App -> LT.Text -> [LT.Text] -> StateT HandlerState IO ()
+handleCommand app cmd args = do
+    let clientList = _clients app
+    client <- liftM _client get
+    when (cmd == "nick") $ case listToMaybe args of
+        Just newNick -> do
+            lift $ updateClient (_nick client) clientList client{_nick = LT.toStrict newNick}
+            modify (\x -> x{_client = setNick (LT.toStrict newNick) (_client x)})
+        Nothing -> return ()
+    where
+        setNick :: T.Text -> Client -> Client
+        setNick t c = c{_nick = t}
