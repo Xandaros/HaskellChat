@@ -34,7 +34,8 @@ removeClient client = flip modifyIORef (delete client)
 
 updateClient :: T.Text -> IORef [Client] -> Client -> IO ()
 updateClient nick clients newClient = do
-    clientM <- (readIORef clients) >>= return . find ((==nick) . _nick)
+    clientList <- readIORef clients
+    let clientM = find ((==nick) . _nick) clientList
     let client = fromJust clientM
     when (isJust clientM) $ putStrLn "Client found" >>
         removeClient client clients >> addClient newClient clients >> putStrLn ("New Nick: " ++ T.unpack (_nick newClient))

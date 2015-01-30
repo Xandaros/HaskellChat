@@ -24,6 +24,7 @@ import           Application
 import           Client hiding (nick)
 
 data HandlerState = HandlerState { _client :: Client
+                                 , _app :: App
                                  }
 
 ------------------------------------------------------------------------------
@@ -68,39 +69,37 @@ socketApp app pending = do
 clientThread :: App -> Client -> IO ()
 clientThread app client = do
     msg <- receiveDataMessage (_connection client)
-    (result, newState) <- runStateT (handleMessage app msg) (HandlerState client)
+    (result, newState) <- runStateT (handleMessage msg) (HandlerState client app)
     when result $ clientThread app (_client newState)
 
-handleMessage :: App -> DataMessage -> StateT HandlerState IO Bool
-handleMessage app a = case a of
+handleMessage :: DataMessage -> StateT HandlerState IO Bool
+handleMessage a = case a of
     (Binary _) -> return True -- Unsupported
-    (Text t) -> handleTextMessage app t
+    (Text t) -> handleTextMessage t
 
-handleTextMessage :: App -> LBS8.ByteString -> StateT HandlerState IO Bool
-handleTextMessage app msg = do
+handleTextMessage :: LBS8.ByteString -> StateT HandlerState IO Bool
+handleTextMessage msg = do
     if isCommand (LT.decodeUtf8 msg)
-        then handleCommand app cmd (drop 1 split')
+        then handleCommand cmd (drop 1 split')
         else do
-            client <- liftM _client get
-            lift $ connections app
+            HandlerState client app <- get
+            lift $ connections app -- TODO
                >>= broadcastPacket ["MSG", LT.fromChunks [_nick client], LT.decodeUtf8 msg]
     (lift.return) True
 
     where split' = LT.splitOn " " (LT.decodeUtf8 msg)
           cmd = fromMaybe "" $ liftM (LT.drop 1) (listToMaybe split')
 
-handleCommand :: App -> LT.Text -> [LT.Text] -> StateT HandlerState IO ()
-handleCommand app cmd args = do
+handleCommand :: LT.Text -> [LT.Text] -> StateT HandlerState IO ()
+handleCommand cmd args = do
+    curState@(HandlerState client app) <- get
     let clientList = _clients app
-    client <- liftM _client get
     when (cmd == "nick") $ case listToMaybe args of
         Just newNick -> do
+            let newClient = client{_nick = LT.toStrict newNick}
             lift $ connections app
                >>= broadcastPacket ["NICK", LT.fromChunks [_nick client], newNick]
 
-            lift $ updateClient (_nick client) clientList client{_nick = LT.toStrict newNick}
-            modify (\x -> x{_client = setNick (LT.toStrict newNick) (_client x)})
+            lift $ updateClient (_nick client) clientList newClient
+            put curState{_client = newClient}
         Nothing -> return ()
-    where
-        setNick :: T.Text -> Client -> Client
-        setNick t c = c{_nick = t}
