@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module MessageHandler
     ( socketApp
@@ -15,7 +14,7 @@ import           Control.Monad.State
 import           Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Lazy.Char8 as LBS8 (ByteString, append)
 import           Data.Maybe (fromMaybe, listToMaybe)
-import           Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
+import qualified Data.Text.Lazy.Encoding as LT (encodeUtf8, decodeUtf8)
 import           Data.IORef
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
@@ -27,6 +26,24 @@ import           Client hiding (nick)
 data HandlerState = HandlerState { _client :: Client
                                  }
 
+------------------------------------------------------------------------------
+-- | Util
+isCommand :: LT.Text -> Bool
+isCommand = ("/" `LT.isPrefixOf`)
+
+------------------------------------------------------------------------------
+-- | Sending stuff
+connections :: App -> IO [Connection]
+connections = liftM (map _connection) . readIORef . _clients
+
+broadcast :: LBS8.ByteString -> [Connection] -> IO ()
+broadcast msg = mapM_ (`send` (DataMessage $ Text msg))
+
+broadcastPacket :: [LT.Text] -> [Connection] -> IO ()
+broadcastPacket = broadcast . LT.encodeUtf8 . LT.unwords
+
+------------------------------------------------------------------------------
+-- | Receiving stuff
 socketApp :: App -> PendingConnection -> IO ()
 socketApp app pending = do
     let clients_ = _clients app
@@ -37,12 +54,12 @@ socketApp app pending = do
     client <- liftM (flip Client connection) $ newNick clients_
 
     addClient client (_clients app)
-
-    liftIO $ putStrLn ("New client: " ++ T.unpack (_nick client))
+    putStrLn ("New client: " ++ T.unpack (_nick client))
 
     (try $ clientThread app client) :: IO (Either ConnectionException ())
 
-    liftIO $ putStrLn ((T.unpack (_nick client)) ++ " Disconnected")
+    connections app >>= broadcastPacket ["QUIT", LT.fromChunks [_nick client]]
+    putStrLn (T.unpack (_nick client) ++ " Disconnected")
 
     removeClient client (_clients app)
 
@@ -54,9 +71,6 @@ clientThread app client = do
     (result, newState) <- runStateT (handleMessage app msg) (HandlerState client)
     when result $ clientThread app (_client newState)
 
-broadcast :: LBS8.ByteString -> [Connection] -> IO ()
-broadcast msg = mapM_ (`send` (DataMessage $ Text msg))
-
 handleMessage :: App -> DataMessage -> StateT HandlerState IO Bool
 handleMessage app a = case a of
     (Binary _) -> return True -- Unsupported
@@ -64,20 +78,16 @@ handleMessage app a = case a of
 
 handleTextMessage :: App -> LBS8.ByteString -> StateT HandlerState IO Bool
 handleTextMessage app msg = do
-    if isCommand (decodeUtf8 msg)
+    if isCommand (LT.decodeUtf8 msg)
         then handleCommand app cmd (drop 1 split')
         else do
             client <- liftM _client get
-            lift $ clients_ >>= broadcast ((encodeUtf8 $ "MSG "
-                `LT.append` LT.fromChunks [_nick client] `LT.append` " ")
-                    `LBS8.append` msg)
+            lift $ connections app
+               >>= broadcastPacket ["MSG", LT.fromChunks [_nick client], LT.decodeUtf8 msg]
     (lift.return) True
-    where split' = LT.splitOn " " (decodeUtf8 msg)
-          cmd = fromMaybe "" $ liftM (LT.drop 1) (listToMaybe split')
-          clients_ = liftM (map _connection) $ readIORef (_clients app)
 
-isCommand :: LT.Text -> Bool
-isCommand = ("/" `LT.isPrefixOf`)
+    where split' = LT.splitOn " " (LT.decodeUtf8 msg)
+          cmd = fromMaybe "" $ liftM (LT.drop 1) (listToMaybe split')
 
 handleCommand :: App -> LT.Text -> [LT.Text] -> StateT HandlerState IO ()
 handleCommand app cmd args = do
@@ -85,6 +95,9 @@ handleCommand app cmd args = do
     client <- liftM _client get
     when (cmd == "nick") $ case listToMaybe args of
         Just newNick -> do
+            lift $ connections app
+               >>= broadcastPacket ["NICK", LT.fromChunks [_nick client], newNick]
+
             lift $ updateClient (_nick client) clientList client{_nick = LT.toStrict newNick}
             modify (\x -> x{_client = setNick (LT.toStrict newNick) (_client x)})
         Nothing -> return ()

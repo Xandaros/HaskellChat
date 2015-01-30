@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 module Client
     ( Client(Client)
     , addClient
