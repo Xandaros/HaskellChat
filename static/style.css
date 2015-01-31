@@ -43,6 +43,8 @@ body
 {
 	margin: 10px;
 	color: #ccc;
+	height: calc(100% - 20px);
+	overflow: auto;
 }
 
 #inputbox

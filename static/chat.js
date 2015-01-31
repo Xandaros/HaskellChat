@@ -16,6 +16,8 @@ socket.onmessage = function(packet)
 	var cont = document.getElementById("chatbox-content");
 	var split = packet.data.split(" ");
 
+	var scroll = cont.scrollTop >= (cont.scrollHeight - cont.offsetHeight);
+
 	var action = split[0];
 	if (action == "MSG")
 	{
@@ -25,6 +27,11 @@ socket.onmessage = function(packet)
 		if (nick != undefined && msg != undefined)
 		{
 			cont.innerHTML = cont.innerHTML + "&lt;" + nick + "&gt; " + msg + "<br />";
+		}
+
+		if (scroll)
+		{
+			cont.scrollTop = cont.scrollHeight;
 		}
 	}
 	else if (action == "NICK")
@@ -36,6 +43,11 @@ socket.onmessage = function(packet)
 		{
 			cont.innerHTML = cont.innerHTML + "* " + oldNick + " is now known as " + newNick + "<br />";
 		}
+
+		if (scroll)
+		{
+			cont.scrollTop = cont.scrollHeight;
+		}
 	}
 	else if (action == "QUIT")
 	{
@@ -44,6 +56,11 @@ socket.onmessage = function(packet)
 		if (nick != undefined)
 		{
 			cont.innerHTML = cont.innerHTML + "* " + nick + " has quit<br />";
+		}
+
+		if (scroll)
+		{
+			cont.scrollTop = cont.scrollHeight;
 		}
 	}
 }
