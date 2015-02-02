@@ -7,6 +7,7 @@ module MessageHandler
     , isCommand -- TODO
     ) where
 
+import           Control.Applicative
 import           Control.Exception (try)
 import           Control.Lens
 import           Control.Monad (when, liftM)
@@ -52,7 +53,7 @@ socketApp app pending = do
     connection <- acceptRequest pending
     forkPingThread connection 5
 
-    client <- liftM (flip Client connection) $ newNick clients_
+    client <- flip Client connection <$> newNick clients_
 
     addClient client (_clients app)
     putStrLn ("New client: " ++ T.unpack (_nick client))
@@ -88,7 +89,7 @@ handleTextMessage msg = do
     (lift.return) True
 
     where split' = LT.splitOn " " (LT.decodeUtf8 msg)
-          cmd = fromMaybe "" $ liftM (LT.drop 1) (listToMaybe split')
+          cmd = fromMaybe "" $ LT.drop 1 <$> listToMaybe split'
 
 handleCommand :: LT.Text -> [LT.Text] -> StateT HandlerState IO ()
 handleCommand cmd args = do

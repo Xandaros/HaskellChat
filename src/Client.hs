@@ -9,7 +9,8 @@ module Client
     )
     where
 
-import           Control.Monad (liftM, when)
+import           Control.Applicative
+import           Control.Monad (when)
 import           Control.Monad.Trans (lift)
 import           Control.Lens
 import           Data.IORef
@@ -43,5 +44,5 @@ updateClient nick clients newClient = do
 newNick :: IORef [Client] -> IO T.Text
 newNick clients = existingNicks >>= \nicks -> return $ fromJust $ find (`notElem` nicks) nickList
     where
-        existingNicks = liftM (map _nick) $ readIORef clients
+        existingNicks = map _nick <$> readIORef clients
         nickList = map (T.pack . ("client"++) . show) [1..]
